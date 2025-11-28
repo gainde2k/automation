@@ -5,14 +5,17 @@ import json
 import os
 import subprocess
 import uvicorn
-
 from dotenv import load_dotenv
+
 _ = load_dotenv()
 
 app = FastAPI()
 
 # Secret for GitHub webhook verification
 GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")
+
+# Local folder where the repo is cloned
+LOCAL_DEPLOY_REPO = os.getenv("LOCAL_DEPLOY_REPO")
 
 
 def verify_signature(request_body: bytes, signature_header: str):
@@ -33,6 +36,36 @@ def verify_signature(request_body: bytes, signature_header: str):
     )
     expected = mac.hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def pull_repo():
+    """Pull latest changes including submodules."""
+    if not os.path.isdir(LOCAL_DEPLOY_REPO):
+        print(f"❌ Directory does not exist: {LOCAL_DEPLOY_REPO}")
+        return
+
+    try:
+        print("⬇️ Pulling latest code for deploy branch...")
+        # Pull the deploy branch
+        subprocess.run(
+            ["git", "checkout", "deploy"],
+            cwd=LOCAL_DEPLOY_REPO,
+            check=True
+        )
+        subprocess.run(
+            ["git", "pull", "--recurse-submodules"],
+            cwd=LOCAL_DEPLOY_REPO,
+            check=True
+        )
+        # Update submodules to match the parent repo
+        subprocess.run(
+            ["git", "submodule", "update", "--init", "--recursive"],
+            cwd=LOCAL_DEPLOY_REPO,
+            check=True
+        )
+        print("✅ Code and submodules updated successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Git operation failed: {e}")
 
 
 @app.post("/webhook/github")
@@ -57,16 +90,14 @@ async def github_webhook(request: Request):
 
     print("🚀 Deploy branch push detected!")
     print(f"Pusher: {pusher}")
-    import ipdb;ipdb.set_trace()
     for c in commits:
         print(f" - Commit: {c['id'][:7]} — {c['message']}")
 
-    # Example: run deployment script (uncomment if needed)
-    # subprocess.Popen(["sh", "/opt/deploy/run_deploy.sh"])
+    # Pull latest code including submodules
+    pull_repo()
 
     return {"message": "Webhook processed successfully"}
 
 
 if __name__ == "__main__":
-    # Run FastAPI app directly
     uvicorn.run("main:app", host="0.0.0.0", port=8040, reload=True)
