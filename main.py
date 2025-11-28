@@ -17,6 +17,9 @@ GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")
 # Local folder where the repo is cloned
 LOCAL_DEPLOY_REPO = os.getenv("LOCAL_DEPLOY_REPO")
 
+# Remote repo URL (needed if repo folder is missing)
+REMOTE_REPO_URL = os.getenv("REMOTE_REPO_URL")
+
 
 def verify_signature(request_body: bytes, signature_header: str):
     """Validate GitHub HMAC SHA256 signature."""
@@ -39,30 +42,30 @@ def verify_signature(request_body: bytes, signature_header: str):
 
 
 def pull_repo():
-    """Pull latest changes including submodules."""
+    """Force update local deploy branch to match remote, including submodules."""
     if not os.path.isdir(LOCAL_DEPLOY_REPO):
-        print(f"❌ Directory does not exist: {LOCAL_DEPLOY_REPO}")
-        return
+        print(f"❌ Directory does not exist: {LOCAL_DEPLOY_REPO}, cloning repo...")
+        try:
+            subprocess.run(
+                ["git", "clone", "--recurse-submodules", "-b", "deploy", REMOTE_REPO_URL, LOCAL_DEPLOY_REPO],
+                check=True,
+            )
+            print("✅ Repository cloned successfully")
+            return
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Git clone failed: {e}")
+            return
 
     try:
-        print("⬇️ Pulling latest code for deploy branch...")
-        # Pull the deploy branch
-        subprocess.run(
-            ["git", "checkout", "deploy"],
-            cwd=LOCAL_DEPLOY_REPO,
-            check=True
-        )
-        subprocess.run(
-            ["git", "pull", "--recurse-submodules"],
-            cwd=LOCAL_DEPLOY_REPO,
-            check=True
-        )
-        # Update submodules to match the parent repo
-        subprocess.run(
-            ["git", "submodule", "update", "--init", "--recursive"],
-            cwd=LOCAL_DEPLOY_REPO,
-            check=True
-        )
+        print("⬇️ Fetching latest code from remote...")
+        subprocess.run(["git", "fetch", "origin"], cwd=LOCAL_DEPLOY_REPO, check=True)
+
+        print("🔄 Resetting local deploy branch to origin/deploy (force)...")
+        subprocess.run(["git", "reset", "--hard", "origin/deploy"], cwd=LOCAL_DEPLOY_REPO, check=True)
+
+        print("🔄 Updating submodules...")
+        subprocess.run(["git", "submodule", "update", "--init", "--recursive"], cwd=LOCAL_DEPLOY_REPO, check=True)
+
         print("✅ Code and submodules updated successfully")
     except subprocess.CalledProcessError as e:
         print(f"❌ Git operation failed: {e}")
@@ -93,7 +96,7 @@ async def github_webhook(request: Request):
     for c in commits:
         print(f" - Commit: {c['id'][:7]} — {c['message']}")
 
-    # Pull latest code including submodules
+    # Force pull latest code including submodules
     pull_repo()
 
     return {"message": "Webhook processed successfully"}
