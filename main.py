@@ -42,13 +42,13 @@ def verify_signature(request_body: bytes, signature_header: str):
 
 
 def pull_repo():
-    """Force update local deploy branch to match remote, including submodules."""
+    """Force update local deploy branch to match remote, including submodules, and update Odoo."""
     if not os.path.isdir(LOCAL_DEPLOY_REPO):
         print(f"❌ Directory does not exist: {LOCAL_DEPLOY_REPO}, cloning repo...")
         try:
             subprocess.run(
                 ["git", "clone", "--recurse-submodules", "-b", "deploy", REMOTE_REPO_URL, LOCAL_DEPLOY_REPO],
-                check=True,
+                check=True
             )
             print("✅ Repository cloned successfully")
             return
@@ -66,9 +66,18 @@ def pull_repo():
         print("🔄 Updating submodules...")
         subprocess.run(["git", "submodule", "update", "--init", "--recursive"], cwd=LOCAL_DEPLOY_REPO, check=True)
 
-        print("✅ Code and submodules updated successfully")
+        print("🐳 Updating Odoo inside Docker (non-interactive)...")
+        subprocess.run([
+            "docker", "exec", "odoo-odoo-1",
+            "odoo", "-d", "odoo",
+            "-c", "/etc/odoo/odoo.conf",
+            "-u", "all",
+            "--stop-after-init",
+        ], check=True)
+
+        print("✅ Code, submodules, and Odoo updated successfully")
     except subprocess.CalledProcessError as e:
-        print(f"❌ Git operation failed: {e}")
+        print(f"❌ Git or Docker operation failed: {e}")
 
 
 @app.post("/webhook/github")
@@ -96,7 +105,7 @@ async def github_webhook(request: Request):
     for c in commits:
         print(f" - Commit: {c['id'][:7]} — {c['message']}")
 
-    # Force pull latest code including submodules
+    # Force pull latest code including submodules and update Odoo
     pull_repo()
 
     return {"message": "Webhook processed successfully"}
