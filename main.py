@@ -6,10 +6,13 @@ import os
 import subprocess
 import uvicorn
 
+from dotenv import load_dotenv
+_ = load_dotenv()
+
 app = FastAPI()
 
 # Secret for GitHub webhook verification
-GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "your-secret-here")
+GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")
 
 
 def verify_signature(request_body: bytes, signature_header: str):
@@ -54,6 +57,7 @@ async def github_webhook(request: Request):
 
     print("🚀 Deploy branch push detected!")
     print(f"Pusher: {pusher}")
+    import ipdb;ipdb.set_trace()
     for c in commits:
         print(f" - Commit: {c['id'][:7]} — {c['message']}")
 
