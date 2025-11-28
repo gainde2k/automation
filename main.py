@@ -1,0 +1,68 @@
+from fastapi import FastAPI, Request, HTTPException
+import hmac
+import hashlib
+import json
+import os
+import subprocess
+import uvicorn
+
+app = FastAPI()
+
+# Secret for GitHub webhook verification
+GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "your-secret-here")
+
+
+def verify_signature(request_body: bytes, signature_header: str):
+    """Validate GitHub HMAC SHA256 signature."""
+    if not signature_header:
+        return False
+    try:
+        sha_name, signature = signature_header.split("=")
+    except ValueError:
+        return False
+    if sha_name != "sha256":
+        return False
+
+    mac = hmac.new(
+        GITHUB_WEBHOOK_SECRET.encode(),
+        msg=request_body,
+        digestmod=hashlib.sha256,
+    )
+    expected = mac.hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+@app.post("/webhook/github")
+async def github_webhook(request: Request):
+    body = await request.body()
+    signature_header = request.headers.get("X-Hub-Signature-256")
+
+    if not verify_signature(body, signature_header):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    event = request.headers.get("X-GitHub-Event")
+    if event != "push":
+        return {"message": f"Ignored event: {event}"}
+
+    payload = json.loads(body)
+    ref = payload.get("ref")
+    if ref != "refs/heads/deploy":
+        return {"message": f"Ignored branch: {ref}"}
+
+    commits = payload.get("commits", [])
+    pusher = payload.get("pusher", {}).get("name", "unknown")
+
+    print("🚀 Deploy branch push detected!")
+    print(f"Pusher: {pusher}")
+    for c in commits:
+        print(f" - Commit: {c['id'][:7]} — {c['message']}")
+
+    # Example: run deployment script (uncomment if needed)
+    # subprocess.Popen(["sh", "/opt/deploy/run_deploy.sh"])
+
+    return {"message": "Webhook processed successfully"}
+
+
+if __name__ == "__main__":
+    # Run FastAPI app directly
+    uvicorn.run("main:app", host="0.0.0.0", port=8040, reload=True)
